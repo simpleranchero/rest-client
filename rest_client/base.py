@@ -2,6 +2,7 @@ import collections
 import functools
 import json
 import logging
+import urllib2
 import pprint
 
 import requests
@@ -17,6 +18,13 @@ requests_log.setLevel(logging.WARNING)
 Pair = collections.namedtuple('Pair', 'key value')
 
 _identifier = 'id'
+
+
+def get_implementation(cls, **kwargs):
+    for subclass in cls.__subclasses__():
+        if all(getattr(subclass, k, None) == v for k, v in kwargs.iteritems()):
+            return subclass
+    return cls
 
 
 class HttpError(Exception):
@@ -47,7 +55,7 @@ class BaseChainedRequester(object):
         self._client = client
         self._path = path
 
-    def _request(self, method='get', path=None, body=None):
+    def _request(self, method='get', path=None, query=None, body=None):
         """
         delegates inner requests to client object with adding
         base path to any requested path
@@ -58,20 +66,8 @@ class BaseChainedRequester(object):
         """
 
         path = self._path + path if path else self._path
-        return self._client._request(method=method, path=path, body=body)
-
-
-class SelectByProperty():
-
-    def __new__(cls, resource):
-        """
-        If there is a separate implementation of ResourceFactory for given
-        resource it will be use, else default ResourceFactory is used
-        """
-        for subclass in cls.__subclasses__():
-            if subclass.RESOURCE is resource:
-                return object.__new__(subclass, resource)
-        return object.__new__(cls, resource)
+        return self._client._request(method=method, path=path,
+                                     query=query, body=body)
 
 
 class FactoryGeneratorMixin():
@@ -79,11 +75,10 @@ class FactoryGeneratorMixin():
     Get resource by property
     """
     def __getattr__(self, item):
-        return ResourceFactory(self, item)
+        return get_implementation(ResourceFactory, RESOURCE=item)(self, item)
 
 
 class Resource(BaseChainedRequester,
-               SelectByProperty,
                FactoryGeneratorMixin):
     """
     Resource base class, that can hold resource fabrics.
@@ -96,13 +91,9 @@ class Resource(BaseChainedRequester,
     RESOURCE = None
     IDENTIFIER = _identifier
 
-    def __new__(cls, client, resource, kwargs):
-        return super(cls, Resource).__new__(cls, resource)
-
-    def __init__(self, client, resource, kwargs):
+    def __init__(self, client, kwargs):
         super(Resource, self).__init__(client, (kwargs[self.IDENTIFIER],))
         self._kwargs = kwargs
-        self._resource_name = resource
 
     def _update(self, kwargs):
         """
@@ -160,8 +151,7 @@ class Resource(BaseChainedRequester,
 
 
 class ResourceFactory(BaseChainedRequester,
-                      FactoryGeneratorMixin,
-                      SelectByProperty):
+                      FactoryGeneratorMixin):
     """
     Creates or lists resources
     @param client: object with _request method, for url chaining
@@ -177,9 +167,6 @@ class ResourceFactory(BaseChainedRequester,
 
     RESOURCE = None
 
-    def __new__(cls, client, resource):
-        return super(cls, ResourceFactory).__new__(cls, resource)
-
     def __init__(self, client, resource):
 
         super(ResourceFactory, self).__init__(
@@ -187,25 +174,26 @@ class ResourceFactory(BaseChainedRequester,
             (resource,),
         )
         self._resource_name = resource
-        self.resource = functools.partial(Resource, self, resource)
+        resource_cls = get_implementation(Resource, RESOURCE=resource)
+        self.resource = functools.partial(resource_cls, self)
 
-    def _get(self, kwargs):
+    def _get(self, where, query):
 
-        response = self._request()
+        response = self._request(query=query)
 
-        if kwargs:
+        if where:
             #filter with kwargs if they are present
 
             try:
                 entities_list = [item for item in response if
-                                 all(item[k] == v for k, v in kwargs.items())]
+                                 all(item[k] == v for k, v in where.items())]
             except KeyError as e:
                 raise FilterError('''Resource "{}" doesn't have "{}" field'''.
-                        format(self._resource_name, e.message))
+                                  format(self._resource_name, e.message))
         else:
             entities_list = response
 
-        def map_and_update():
+        def resources():
             updatable = True
             for entity in entities_list:
                 e = self.resource(entity)
@@ -217,23 +205,25 @@ class ResourceFactory(BaseChainedRequester,
                     else:
                         raise
                 yield e
-        return map_and_update()
+        return resources()
 
-    def get(self, **kwargs):
+    def get(self, where=None, query=None):
         """
         Get resources with filtering
-        @param kwargs: optional attribute filter
+        @param where: optional dict param to filter response
+        @param query: optional dict of queries to be send with request
         @return: list of resources or None depending on filter
         """
-        return list(self._get(kwargs))
+        return list(self._get(where, query))
 
-    def first(self, **kwargs):
+    def first(self, where=None, query=None):
         """
         Get first resource with filtering
-        @param kwargs: optional attribute filter
+        @param where: optional dict param to filter response
+        @param query: optional dict of queries to be send with request
         @return: resource or None depending on filter
         """
-        return next(self._get(kwargs), None)
+        return next(self._get(where, query), None)
 
     def post(self, **kwargs):
         """
@@ -262,12 +252,16 @@ class Client(object, FactoryGeneratorMixin):
         self.url = 'http://{}'.format(url)
         self.auth = auth
 
-    def _request(self, method='get', path=None, token=None, body=None):
+    def _request(self, method='get', path=None, query=None, body=None):
         """
         Request sender. Joins all chained resources in path.
         @raises HttpError is response is not ok
         """
-        url = '/'.join((self.url,) + path)
+        query_path = ''
+        if query:
+            query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
+                                        for k, v in query.iteritems())
+        url = '/'.join((self.url,) + path) + query_path
 
         headers = {'Content-Type': 'application/json'}
         if body:
@@ -280,11 +274,12 @@ class Client(object, FactoryGeneratorMixin):
             headers=headers,
             data=body)
 
-        log.debug('request: {} {} {}'.format(
+        log.debug('request headers: {} {} {}'.format(
             method.upper(),
             url,
             response.status_code))
-        log.debug('body: {}'.format(response.request.body))
+        log.debug('request body: {}'.format(response.request.body))
+        log.debug('response body: {}'.format(response.text))
 
         if response.status_code not in range(200, 210):
             raise HttpError('\n'.join((str(response.status_code),

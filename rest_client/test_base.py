@@ -7,6 +7,19 @@ import httpretty
 import base
 
 
+class VersionFactory(base.ResourceFactory):
+    RESOURCE = 'version'
+
+    def _get(self, where=None, query=None):
+        print query
+        return iter([self.resource(self._request(query=query))])
+
+
+class Version(base.Resource):
+    RESOURCE = 'version'
+    IDENTIFIER = 'number'
+
+
 class TestBase(object):
 
     @classmethod
@@ -14,34 +27,43 @@ class TestBase(object):
     def class_setup(cls, request):
 
         httpretty.enable()
-        deals_url = "http://random.random.org/v1/deals"
-        deals_data = [
-            {"title": "Test Deal",
-             "id": "1111"},
-            {"title": "Second Deal",
-             "id": "2222"}
-        ]
 
-        test_deal_url = "http://random.random.org/v1/deals/1111"
-        test_deal_data = {
-            "title": "Test Deal",
-            "id": "1111",
-            "description": "some description",
-            "date": "12:11:32 Tue 14 Apr 2014",
-            "agent": "007"
+        base_url = "http://random.random.org/v1"
+
+        deals = {
+            "url": "/deals",
+            "data": [
+                {"title": "Test Deal",
+                 "id": "1111"},
+                {"title": "Second Deal",
+                 "id": "2222"}
+            ]
         }
 
-        second_deal_url = "http://random.random.org/v1/deals/2222"
-        second_deal_data = {
-            "title": "Second Deal",
-            "id": "2222",
-            "description": "another description",
-            "date": "11:11:32 Tue 14 Apr 2014",
-            "agent": "666"
+        test_deal = {
+            "url": "/deals/1111",
+            "data": {
+                "title": "Test Deal",
+                "id": "1111",
+                "description": "some description",
+                "date": "12:11:32 Tue 14 Apr 2014",
+                "agent": "007"
+            }
+        }
+
+        second_deal = {
+            "url": "/deals/2222",
+            "data": {
+                "title": "Second Deal",
+                "id": "2222",
+                "description": "another description",
+                "date": "11:11:32 Tue 14 Apr 2014",
+                "agent": "666"
+            }
         }
 
         second_deal_items = {
-            "url": "http://random.random.org/v1/deals/2222/items",
+            "url": "/deals/2222/items",
             "data": [
             {"title": "oranges",
              "id": "12345"},
@@ -50,7 +72,7 @@ class TestBase(object):
         }
 
         second_deal_items_oranges = {
-            "url": "http://random.random.org/v1/deals/2222/items/12345",
+            "url": "/deals/2222/items/12345",
             "data": {
                 "title": "oranges",
                 "id": "12345",
@@ -58,32 +80,32 @@ class TestBase(object):
                 "price": "200"}
         }
 
-        agents_url = "http://random.random.org/v1/agents"
-        agents_data = [
-            {"name": "Kurochkin",
-             "id": "007"},
-            {"name": "Putler",
-             "id": "666"}
-        ]
+        agents = {
+            "url": "/agents",
+            "data": [
+                {"name": "Kurochkin",
+                 "id": "007"},
+                {"name": "Putler",
+                 "id": "666"}
+            ]
+        }
 
+        version = {
+            "url": '/version',
+            "data": {'number': '124.23.4'}
+        }
         cls.service = {
-            "deals": {
-                "url": deals_url,
-                "data": deals_data},
-            "test_deal": {
-                "url": test_deal_url,
-                "data": test_deal_data},
-            "second_deal": {
-                "url": second_deal_url,
-                "data": second_deal_data},
+            "deals": deals,
+            "test_deal": test_deal,
+            "second_deal": second_deal,
             "second_deal_items": second_deal_items,
             "second_deal_items_oranges": second_deal_items_oranges,
-            "agents": {
-                "url": agents_url,
-                "data": agents_data}}
+            "agents": agents,
+            'version': version}
 
         for value in cls.service.values():
-            httpretty.register_uri(httpretty.GET, value['url'],
+            httpretty.register_uri(httpretty.GET,
+                                   ''.join([base_url, value['url']]),
                                    body=json.dumps(value['data']),
                                    content_type="application/json")
 
@@ -94,24 +116,30 @@ class TestBase(object):
     def client(self):
         return base.Client('random.random.org/v1')
 
-    def test_sanity(self):
-        response = requests.get(self.service['deals']['url'])
+    def test_sanity(self, client):
+        client.deals.get()
+        response = requests.get("http://random.random.org/v1/deals")
         assert response.json() == self.service['deals']['data']
+
+    def test_get_all(self, client):
+        assert client.deals.get()[1]['id'] == \
+                   self.service['deals']['data'][1]['id']
 
     def test_get_first(self, client):
         assert client.deals.first()['id'] == '1111'
 
     def test_get_first_filter(self, client):
-        assert client.deals.first(title='Second Deal')['id'] == '2222'
+        assert client.deals.first(
+            where={'title': 'Second Deal'})['id'] == '2222'
 
     def test_get_first_raises(self, client):
         with pytest.raises(base.FilterError) as excinfo:
-            client.deals.first(name='Second Deal')
+            client.deals.first(where={'name': 'Second Deal'})
         assert excinfo.value.message == \
             '''Resource "deals" doesn't have "name" field'''
 
     def test_updating_resource_got_from_list(self, client):
-        test_deal = client.deals.first(title='Test Deal')
+        test_deal = client.deals.first(where={'title': 'Test Deal'})
         test_deal.get()
         assert test_deal['agent'] == self.service['test_deal']['data']['agent']
 
@@ -119,9 +147,17 @@ class TestBase(object):
         pass
 
     def test_get_encapsulated_resource(self, client):
-        second_deal = client.deals.first(title='Second Deal')
-        oranges = second_deal.items.first(title="oranges")
+        second_deal = client.deals.first(where={'title': 'Second Deal'})
+        oranges = second_deal.items.first(where={'title': "oranges"})
         oranges.get()
         assert oranges['amount'] == \
             self.service["second_deal_items_oranges"]['data']['amount']
+
+    def test_get_url_filters(self, client):
+        test_deal = client.deals.first(query={'title': 'Test Deal'})
+        # TODO: check that URL query was send correctly
+
+    def test_get_new_resource_factory(self, client):
+        version = client.version.first()
+        assert version['number'] == self.service['version']['data']['number']
 
