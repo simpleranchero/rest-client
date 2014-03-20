@@ -1,10 +1,10 @@
-import collections
 import functools
 import json
 import logging
 import urllib2
 import pprint
 
+import jsonschema
 import requests
 
 logging.basicConfig(level=logging.DEBUG)
@@ -14,8 +14,6 @@ log = logging.getLogger(__name__)
 requests_log = logging.getLogger("requests")
 requests_log.setLevel(logging.WARNING)
 
-
-Pair = collections.namedtuple('Pair', 'key value')
 
 _identifier = 'id'
 
@@ -51,6 +49,7 @@ class BaseChainedRequester(object):
     @param path: base path tuple of current object that will be added to
     each request
     """
+
     def __init__(self, client, path):
         self._client = client
         self._path = path
@@ -82,7 +81,7 @@ class ChainCaller():
 
 
 class Resource(BaseChainedRequester,
-               ChainCaller):
+               ChainCaller,):
     """
     Resource base class, that can hold resource fabrics.
     @param client: object with _request method, for url chaining
@@ -93,6 +92,7 @@ class Resource(BaseChainedRequester,
     """
     RESOURCE = None
     IDENTIFIER = _identifier
+    SCHEMA = None
 
     def __init__(self, client, kwargs):
         super(Resource, self).__init__(client, (kwargs[self.IDENTIFIER],))
@@ -178,6 +178,7 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         )
         self._resource_name = resource
         resource_cls = get_implementation(Resource, RESOURCE=resource)
+        self._resource_schema = resource_cls.SCHEMA
         self.resource = functools.partial(resource_cls, self)
 
     def _get(self, where, query):
@@ -199,12 +200,14 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         def resources():
             updatable = True
             for entity in entities_list:
-                e = self.resource(entity)
+                if self._resource_schema:
+                    jsonschema.validate(entity, self._resource_schema)
+                ent = self.resource(entity)
                 try:
-                    updatable and e.get()
+                    updatable and ent.get()
                 except Exception as e:
                     updatable = False
-                yield e
+                yield ent
         return resources()
 
     def get(self, where=None, query=None):
@@ -267,12 +270,15 @@ class Client(object, ChainCaller):
         if body:
             body = json.dumps(body)
 
-        response = requests.request(
-            method,
-            url,
-            auth=self.auth,
-            headers=headers,
-            data=body)
+        try:
+            response = requests.request(
+                method,
+                url,
+                auth=self.auth,
+                headers=headers,
+                data=body)
+        except Exception as e:
+            raise HttpError(e.message)
 
         log.debug('request headers: {} {} {}'.format(
             method.upper(),

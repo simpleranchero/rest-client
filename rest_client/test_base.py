@@ -1,5 +1,6 @@
 import json
 
+import jsonschema
 import requests
 import pytest
 import httpretty
@@ -11,13 +12,27 @@ class VersionFactory(base.ResourceFactory):
     RESOURCE = 'version'
 
     def _get(self, where=None, query=None):
-        print query
         return iter([self.resource(self._request(query=query))])
 
 
 class Version(base.Resource):
     RESOURCE = 'version'
     IDENTIFIER = 'number'
+
+
+class Agent(base.Resource):
+    RESOURCE = 'agents'
+    SCHEMA = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "secret": {"type": "string"},
+            "tasks": {"type": "number"},
+            "id": {"type": "string"},
+            'email': {'type': 'string', 'format': 'email'}
+        },
+        "required": ['email']
+    }
 
 
 class TestBase(object):
@@ -85,9 +100,13 @@ class TestBase(object):
             "data": [
                 {"name": "Kurochkin",
                  'secret': 'AA',
-                 "id": "007"},
+                 'tasks': 2,
+                 "id": "007",
+                 "email": "k@mail.com"
+                 },
                 {"name": "Adler",
                  'secret': 'A',
+                 'tasks': 0,
                  "id": "111"}
             ]
         }
@@ -110,7 +129,7 @@ class TestBase(object):
             "second_deal_items": second_deal_items,
             "second_deal_items_oranges": second_deal_items_oranges,
             "agents": agents,
-            "agents_A": agents_A,
+            "agents_AA": agents_A,
             'version': version}
 
         for value in cls.service.values():
@@ -173,4 +192,9 @@ class TestBase(object):
 
     def test_get_factory_from_factory(self, client):
         A_agents = client.agents.AA.first()
-        assert A_agents['name'] == self.service['age']
+        assert A_agents['name'] == self.service['agents_AA']['data'][0]['name']
+
+    def test_get_resource_with_schema(self, client):
+        client.agents.first(where={'name': 'Kurochkin'})
+        with pytest.raises(jsonschema.ValidationError) as excinfo:
+            client.agents.first(where={'name': 'Adler'})
