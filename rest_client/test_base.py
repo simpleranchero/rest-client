@@ -84,9 +84,18 @@ class TestBase(object):
             "url": "/agents",
             "data": [
                 {"name": "Kurochkin",
+                 'secret': 'AA',
                  "id": "007"},
-                {"name": "Putler",
-                 "id": "666"}
+                {"name": "Adler",
+                 'secret': 'A',
+                 "id": "111"}
+            ]
+        }
+        agents_A = {
+            'url': '/agents/AA',
+            'data': [
+                {'name': 'Kurochkin',
+                 'id': '007'}
             ]
         }
 
@@ -101,6 +110,7 @@ class TestBase(object):
             "second_deal_items": second_deal_items,
             "second_deal_items_oranges": second_deal_items_oranges,
             "agents": agents,
+            "agents_A": agents_A,
             'version': version}
 
         for value in cls.service.values():
@@ -161,3 +171,6 @@ class TestBase(object):
         version = client.version.first()
         assert version['number'] == self.service['version']['data']['number']
 
+    def test_get_factory_from_factory(self, client):
+        A_agents = client.agents.AA.first()
+        assert A_agents['name'] == self.service['age']

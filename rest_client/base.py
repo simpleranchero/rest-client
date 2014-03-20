@@ -70,16 +70,19 @@ class BaseChainedRequester(object):
                                      query=query, body=body)
 
 
-class FactoryGeneratorMixin():
+class ChainCaller():
     """
     Get resource by property
     """
+    CHAINS = None
+
     def __getattr__(self, item):
-        return get_implementation(ResourceFactory, RESOURCE=item)(self, item)
+        return get_implementation(self.CHAINS or ResourceFactory,
+                                  RESOURCE=item)(self, item)
 
 
 class Resource(BaseChainedRequester,
-               FactoryGeneratorMixin):
+               ChainCaller):
     """
     Resource base class, that can hold resource fabrics.
     @param client: object with _request method, for url chaining
@@ -150,8 +153,7 @@ class Resource(BaseChainedRequester,
              footer))
 
 
-class ResourceFactory(BaseChainedRequester,
-                      FactoryGeneratorMixin):
+class ResourceFactory(BaseChainedRequester, ChainCaller):
     """
     Creates or lists resources
     @param client: object with _request method, for url chaining
@@ -166,6 +168,7 @@ class ResourceFactory(BaseChainedRequester,
     """
 
     RESOURCE = None
+    PRODUCES = Resource
 
     def __init__(self, client, resource):
 
@@ -199,11 +202,8 @@ class ResourceFactory(BaseChainedRequester,
                 e = self.resource(entity)
                 try:
                     updatable and e.get()
-                except HttpError as e:
-                    if '404' in e.message:
-                        updatable = False
-                    else:
-                        raise
+                except Exception as e:
+                    updatable = False
                 yield e
         return resources()
 
@@ -236,7 +236,7 @@ class ResourceFactory(BaseChainedRequester,
         return self.resource(self._request(path=t_id))
 
 
-class Client(object, FactoryGeneratorMixin):
+class Client(object, ChainCaller):
     """
     Entry point for the front end API.Does not contain
     public methods, only holds resource fabrics
