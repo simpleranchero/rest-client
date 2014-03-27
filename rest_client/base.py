@@ -95,6 +95,7 @@ class Resource(BaseChainedRequester,
     SCHEMA = None
 
     def __init__(self, client, kwargs):
+        print kwargs
         super(Resource, self).__init__(client, (kwargs[self.IDENTIFIER],))
         self._kwargs = kwargs
 
@@ -186,8 +187,8 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         response = self._request(query=query)
 
         if where:
-            #filter with kwargs if they are present
 
+            #filter with kwargs if they are present
             try:
                 entities_list = [item for item in response if
                                  all(item[k] == v for k, v in where.items())]
@@ -291,3 +292,39 @@ class Client(object, ChainCaller):
             raise HttpError('\n'.join((str(response.status_code),
                                        response.text)))
         return response.json()
+
+
+class FakeClient(object, ChainCaller):
+    """
+    Entry point for the front end API.Does not contain
+    public methods, only holds resource fabrics
+    @param auth: username/password tuple
+    @param url: base API url
+
+    usage:
+    client = Client(('admin', 'password'),'10.10.121.53')
+    all_users = client.users.get()
+    ...
+    """
+    def __init__(self, url, auth=None):
+        self.url = 'http://{}'.format(url)
+        self.auth = auth
+
+    def _request(self, method='get', path=None, query=None, body=None):
+        """
+        Request sender. Joins all chained resources in path.
+        @raises HttpError is response is not ok
+        """
+        query_path = ''
+        if query:
+            query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
+                                        for k, v in query.iteritems())
+        url = '/'.join((self.url,) + path) + query_path
+
+        headers = {'Content-Type': 'application/json'}
+
+        print method.upper(), url
+        print "headers: "
+        pprint.pprint(headers)
+        pprint.pprint(body)
+        return [{'id': 1}]

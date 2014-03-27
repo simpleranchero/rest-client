@@ -145,6 +145,10 @@ class TestBase(object):
     def client(self):
         return base.Client('random.random.org/v1')
 
+    @pytest.fixture(scope='class')
+    def fakeclient(self):
+        return base.FakeClient('random.random.org/v1')
+
     def test_sanity(self, client):
         client.deals.get()
         response = requests.get("http://random.random.org/v1/deals")
@@ -198,3 +202,6 @@ class TestBase(object):
         client.agents.first(where={'name': 'Kurochkin'})
         with pytest.raises(jsonschema.ValidationError) as excinfo:
             client.agents.first(where={'name': 'Adler'})
+
+    def test_fake_client_create_resource(self, fakeclient):
+        fakeclient.nf.firewalls.get()
