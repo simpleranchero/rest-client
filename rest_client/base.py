@@ -255,6 +255,7 @@ class Client(object, ChainCaller):
     def __init__(self, url, auth=None):
         self.url = 'http://{}'.format(url)
         self.auth = auth
+        self.trailing_slash = False
 
     def _request(self, method='get', path=None, query=None, body=None):
         """
@@ -265,7 +266,8 @@ class Client(object, ChainCaller):
         if query:
             query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
                                         for k, v in query.iteritems())
-        url = '/'.join((self.url,) + path) + query_path
+        trailing = '/' if self.trailing_slash else ''
+        url = '/'.join((self.url,) + path) + trailing + query_path
 
         headers = {'Content-Type': 'application/json'}
         if body:
@@ -309,6 +311,7 @@ class FakeClient(object, ChainCaller):
     def __init__(self, url, auth=None):
         self.url = 'http://{}'.format(url)
         self.auth = auth
+        self.trailing_slash = False
 
     def _request(self, method='get', path=None, query=None, body=None):
         """
@@ -319,7 +322,8 @@ class FakeClient(object, ChainCaller):
         if query:
             query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
                                         for k, v in query.iteritems())
-        url = '/'.join((self.url,) + path) + query_path
+        trailing = '/' if self.trailing_slash else ''
+        url = '/'.join((self.url,) + path) + trailing + query_path
 
         headers = {'Content-Type': 'application/json'}
 

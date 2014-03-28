@@ -110,6 +110,8 @@ class TestBase(object):
                  "id": 111}
             ]
         }
+        slashed_agents = dict(agents)
+        slashed_agents.update({"url": "/slashedagents/"})
         adler = {
             "url": "/agents/111",
             'data': {
@@ -139,6 +141,7 @@ class TestBase(object):
             "second_deal_items": second_deal_items,
             "second_deal_items_oranges": second_deal_items_oranges,
             "agents": agents,
+            "slashedagents": slashed_agents,
             'adler': adler,
             "agents_AA": agents_A,
             'version': version}
@@ -224,3 +227,8 @@ class TestBase(object):
     def test_int_id_can_be_requested(self, client):
         adler = client.agents.first(where={'name': 'Adler'})
         assert adler['email'] == self.service['adler']['data']['email']
+
+    def test_trailing_slash(self, client):
+        client.trailing_slash = True
+        slashed_adler = client.slashedagents.first(where={'name': 'Adler'})
+        assert slashed_adler['name'] == 'Adler'
