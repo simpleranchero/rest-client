@@ -96,7 +96,7 @@ class Resource(BaseChainedRequester,
 
     def __init__(self, client, kwargs):
         print kwargs
-        super(Resource, self).__init__(client, (kwargs[self.IDENTIFIER],))
+        super(Resource, self).__init__(client, (str(kwargs[self.IDENTIFIER]),))
         self._kwargs = kwargs
 
     def _update(self, kwargs):
@@ -201,8 +201,6 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         def resources():
             updatable = True
             for entity in entities_list:
-                if self._resource_schema:
-                    jsonschema.validate(entity, self._resource_schema)
                 ent = self.resource(entity)
                 try:
                     updatable and ent.get()
@@ -236,6 +234,8 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         @rtype resource sub-type
         @return: specified on time of creation resource
         """
+        if self._resource_schema:
+            jsonschema.validate(kwargs, self._resource_schema)
         t_id = (self._request(method='post', body=kwargs)['id'],)
         return self.resource(self._request(path=t_id))
 
@@ -327,4 +327,4 @@ class FakeClient(object, ChainCaller):
         print "headers: "
         pprint.pprint(headers)
         pprint.pprint(body)
-        return [{'id': 1}]
+        return [{'id': '1'}]
