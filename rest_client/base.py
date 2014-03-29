@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import json
 import logging
@@ -38,6 +39,7 @@ class FilterError(BaseRestError):
 
 
 class BaseChainedRequester(object):
+
     """
     Base class that implements request chaining interface:
     it takes client object that have '_request' method
@@ -54,7 +56,7 @@ class BaseChainedRequester(object):
         self._client = client
         self._path = path
 
-    def _request(self, method='get', path=None, query=None, body=None):
+    def _request(self, method='get', **kwargs):
         """
         delegates inner requests to client object with adding
         base path to any requested path
@@ -64,9 +66,9 @@ class BaseChainedRequester(object):
         @return: response dict or list of dicts
         """
 
-        path = self._path + path if path else self._path
-        return self._client._request(method=method, path=path,
-                                     query=query, body=body)
+        path = kwargs.get('path', ())
+        kwargs.update(path=self._path + path)
+        return self._client._request(method=method, **kwargs)
 
 
 class ChainCaller():
@@ -95,7 +97,6 @@ class Resource(BaseChainedRequester,
     SCHEMA = None
 
     def __init__(self, client, kwargs):
-        print kwargs
         super(Resource, self).__init__(client, (str(kwargs[self.IDENTIFIER]),))
         self._kwargs = kwargs
 
@@ -186,28 +187,36 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
 
         response = self._request(query=query)
 
+        def resources():
+            req = True
+            for entity in response:
+                ent = self.resource(entity)
+                try:
+                    if req:
+                        ent.get()
+                except HttpError as e:
+                    req = False
+                yield ent
+
         if where:
 
             #filter with kwargs if they are present
-            try:
-                entities_list = [item for item in response if
-                                 all(item[k] == v for k, v in where.items())]
-            except KeyError as e:
-                raise FilterError('''Resource "{}" doesn't have "{}" field'''.
-                                  format(self._resource_name, e.message))
-        else:
-            entities_list = response
+            def filtered_resources():
+                for resource in resources():
+                    try:
+                        if all(resource[k] == v for k, v in where.items()):
+                            yield resource
+                    except KeyError as e:
+                        raise FilterError(
+                            '''Resource "{}" doesn't have "{}" field'''.
+                            format(self._resource_name, e.message)
+                        )
 
-        def resources():
-            updatable = True
-            for entity in entities_list:
-                ent = self.resource(entity)
-                try:
-                    updatable and ent.get()
-                except Exception as e:
-                    updatable = False
-                yield ent
-        return resources()
+            entities_gen = filtered_resources()
+        else:
+            entities_gen = iter(response)
+
+        return entities_gen
 
     def get(self, where=None, query=None):
         """
@@ -252,24 +261,35 @@ class Client(object, ChainCaller):
     all_users = client.users.get()
     ...
     """
+
+    _headers = {}
+
     def __init__(self, url, auth=None):
         self.url = 'http://{}'.format(url)
         self.auth = auth
         self.trailing_slash = False
 
-    def _request(self, method='get', path=None, query=None, body=None):
+    def _request(self, method='get', **kwargs):
         """
         Request sender. Joins all chained resources in path.
         @raises HttpError is response is not ok
         """
+
         query_path = ''
+        query = kwargs.get('query', None)
         if query:
             query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
                                         for k, v in query.iteritems())
         trailing = '/' if self.trailing_slash else ''
+
+        path = kwargs.get('path', ())
         url = '/'.join((self.url,) + path) + trailing + query_path
 
-        headers = {'Content-Type': 'application/json'}
+        headers = kwargs.get('headers', {})
+        headers.update({'Content-Type': 'application/json'})
+        headers.update(self._headers)
+
+        body = kwargs.get('body', None)
         if body:
             body = json.dumps(body)
 
@@ -282,14 +302,15 @@ class Client(object, ChainCaller):
                 data=body)
         except Exception as e:
             raise HttpError(e.message)
-
-        log.debug('request headers: {} {} {}'.format(
+        log.debug('-'*18)
+        log.debug('request : {} {} {}'.format(
             method.upper(),
             url,
             response.status_code))
+        log.debug('request headers: {}'.format(headers))
         log.debug('request body: {}'.format(response.request.body))
         log.debug('response body: {}'.format(response.text))
-
+        log.debug('-'*18)
         if response.status_code not in range(200, 210):
             raise HttpError('\n'.join((str(response.status_code),
                                        response.text)))
@@ -332,3 +353,28 @@ class FakeClient(object, ChainCaller):
         pprint.pprint(headers)
         pprint.pprint(body)
         return [{'id': '1'}]
+
+
+class Context():
+    def __init__(self, obj,  **kwargs):
+        self.kwargs = {k: v(obj) for k, v in kwargs.iteritems()}
+
+    def _update_cls(self, kwargs):
+        for k, v in kwargs.iteritems():
+            setattr(Client, k, v)
+
+    def __enter__(self):
+        self.initial = {k: getattr(Client, k) for k in self.kwargs}
+        self._update_cls(self.kwargs)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._update_cls(self.initial)
+        if exc_type:
+            raise exc_type(exc_val)
+
+
+def context_headers(cls, callback):
+    def __call(self):
+        return Context(self, _headers=callback)
+    cls.__call__ = __call
+

@@ -35,6 +35,12 @@ class Agent(base.Resource):
     }
 
 
+class Department(base.Resource):
+    RESOURCE = 'departments'
+
+base.context_headers(Department, lambda obj: {'X-department': obj['id']})
+
+
 class TestBase(object):
 
     @classmethod
@@ -102,7 +108,6 @@ class TestBase(object):
                  'secret': 'AA',
                  'tasks': 2,
                  "id": "007",
-                 "email": "k@mail.com"
                  },
                 {"name": "Adler",
                  'secret': 'A',
@@ -122,6 +127,16 @@ class TestBase(object):
                 'email': 'kurochkin@mail.com'
             }
         }
+        kurochkin = {
+            "url": "/agents/007",
+            'data': {
+                "name": "Kurochkin",
+                'secret': 'AA',
+                'tasks': 2,
+                "id": "007",
+                'email': 'k@mail.com'
+            }
+        }
         agents_A = {
             'url': '/agents/AA',
             'data': [
@@ -134,6 +149,41 @@ class TestBase(object):
             "url": '/version',
             "data": {'number': '124.23.4'}
         }
+
+        departments = {
+            "url": '/departments',
+            "data": [
+                {'id': '123456'},
+            ]
+        }
+
+        security = {
+            "url": '/departments/123456',
+            "data": {
+            'title': 'security',
+            'id': '123456',
+            'access': 'AAA'
+            }
+        }
+
+        mysteries = {
+            "url": '/mysteries',
+            "headers": {'X-department': '123456'},
+            "data": [
+                {'id': 1}
+            ]
+        }
+
+        super_mystery = {
+            "url": '/mysteries/1',
+            "headers": {'X-department': '123456'},
+            "data": {
+                'id': 1,
+                'title': 'super mystery',
+                'text': 'this service is fake'
+            }
+        }
+
         cls.service = {
             "deals": deals,
             "test_deal": test_deal,
@@ -143,13 +193,21 @@ class TestBase(object):
             "agents": agents,
             "slashedagents": slashed_agents,
             'adler': adler,
+            'kurochkin': kurochkin,
             "agents_AA": agents_A,
-            'version': version}
+            'version': version,
+            'departments': departments,
+            'security': security,
+            'mysteries': mysteries,
+            'super_mystery': super_mystery
+        }
 
         for value in cls.service.values():
+            headers = value.get('headers')
             httpretty.register_uri(httpretty.GET,
                                    ''.join([base_url, value['url']]),
                                    body=json.dumps(value['data']),
+                                   forcing_headers=headers,
                                    content_type="application/json")
 
         fin = lambda: httpretty.disable()
@@ -170,7 +228,7 @@ class TestBase(object):
 
     def test_get_all(self, client):
         assert client.deals.get()[1]['id'] == \
-                   self.service['deals']['data'][1]['id']
+            self.service['deals']['data'][1]['id']
 
     def test_get_first(self, client):
         assert client.deals.first()['id'] == '1111'
@@ -231,4 +289,12 @@ class TestBase(object):
     def test_trailing_slash(self, client):
         client.trailing_slash = True
         slashed_adler = client.slashedagents.first(where={'name': 'Adler'})
+        client.trailing_slash = False
         assert slashed_adler['name'] == 'Adler'
+
+    def test_context_headers(self, client):
+        security = client.departments.first(where={'title': 'security'})
+        with security():
+            super_mystery = \
+                client.mysteries.first(where={'title': 'super mystery'})
+        assert super_mystery['text'] == 'this service is fake'
