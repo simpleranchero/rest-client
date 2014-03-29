@@ -298,3 +298,7 @@ class TestBase(object):
             super_mystery = \
                 client.mysteries.first(where={'title': 'super mystery'})
         assert super_mystery['text'] == 'this service is fake'
+
+    def test_resource_identifier_propagation(self, client):
+        # TODO: Write actual test, ASAP
+        pass

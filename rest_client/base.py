@@ -181,6 +181,7 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         self._resource_name = resource
         resource_cls = get_implementation(Resource, RESOURCE=resource)
         self._resource_schema = resource_cls.SCHEMA
+        self._id = resource_cls.IDENTIFIER
         self.resource = functools.partial(resource_cls, self)
 
     def _get(self, where, query):
@@ -245,7 +246,7 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         """
         if self._resource_schema:
             jsonschema.validate(kwargs, self._resource_schema)
-        t_id = (self._request(method='post', body=kwargs)['id'],)
+        t_id = (self._request(method='post', body=kwargs)[self._id],)
         return self.resource(self._request(path=t_id))
 
 
