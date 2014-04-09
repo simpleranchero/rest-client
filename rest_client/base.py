@@ -8,6 +8,7 @@ import pprint
 import jsonschema
 import requests
 
+from pprint import pprint as pp
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ requests_log.setLevel(logging.WARNING)
 
 
 _identifier = 'id'
+_resource_list_slash = False
+_resource_slash = False
 
 
 def get_implementation(cls, **kwargs):
@@ -38,24 +41,23 @@ class FilterError(BaseRestError):
     pass
 
 
-class BaseChainedRequester(object):
-
+class Base(object):
     """
-    Base class that implements request chaining interface:
-    it takes client object that have '_request' method
-    and base path. And then when inner request come
-    it is redirected to client object with adding base path to
-    request path.
-    @param client: object that has _request method - client, resource
-    or resource_factory
-    @param path: base path tuple of current object that will be added to
-    each request
+    Get resource by property
     """
 
     def __init__(self, client, path):
         self._client = client
         self._path = path
+        print path
 
+    def __getattr__(self, item):
+        print item
+        resource_list_cls = get_implementation(ResourceList, RESOURCE=item)
+        return resource_list_cls(self._client, self._path + (item,))
+
+
+class BaseRequest(Base):
     def _request(self, method='get', **kwargs):
         """
         delegates inner requests to client object with adding
@@ -65,39 +67,29 @@ class BaseChainedRequester(object):
         @param body: dict that will be dumped to json
         @return: response dict or list of dicts
         """
-
-        path = kwargs.get('path', ())
-        kwargs.update(path=self._path + path)
+        pprint.pprint(kwargs)
+        path = self._path + kwargs.get('path', ())
+        kwargs.update(path=path)
         return self._client._request(method=method, **kwargs)
 
 
-class ChainCaller():
+class Resource(BaseRequest):
     """
-    Get resource by property
-    """
-    CHAINS = None
-
-    def __getattr__(self, item):
-        return get_implementation(self.CHAINS or ResourceFactory,
-                                  RESOURCE=item)(self, item)
-
-
-class Resource(BaseChainedRequester,
-               ChainCaller,):
-    """
-    Resource base class, that can hold resource fabrics.
+    Resource base class, that can hold resource lists.
     @param client: object with _request method, for url chaining
     @param kwargs: resource attributes
 
     usage:
-    foo = client.resources.create( name='foo')
+    foo = client.resources.post(name='foo')
     """
     RESOURCE = None
     IDENTIFIER = _identifier
     SCHEMA = None
 
-    def __init__(self, client, kwargs):
-        super(Resource, self).__init__(client, (str(kwargs[self.IDENTIFIER]),))
+    def __init__(self, client, path, kwargs):
+        self._resource_name = path[-1]
+        path = path + (str(kwargs[self.IDENTIFIER]),)
+        super(Resource, self).__init__(client, path)
         self._kwargs = kwargs
 
     def _update(self, kwargs):
@@ -147,7 +139,7 @@ class Resource(BaseChainedRequester,
         """
         Better string representation
         """
-        header = '---{} object---'.format(self.__class__.__name__)
+        header = '---{} object---'.format(self._resource_name)
         footer = '-------------------'
         return '\n'.join(
             (header,
@@ -155,11 +147,11 @@ class Resource(BaseChainedRequester,
              footer))
 
 
-class ResourceFactory(BaseChainedRequester, ChainCaller):
+class ResourceList(BaseRequest):
     """
     Creates or lists resources
     @param client: object with _request method, for url chaining
-    @param resource: requested resource
+    @param path: requested resource
 
     usage:
     class SomeResource():
@@ -170,54 +162,53 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
     """
 
     RESOURCE = None
-    PRODUCES = Resource
 
-    def __init__(self, client, resource):
+    def __init__(self, client, path):
 
-        super(ResourceFactory, self).__init__(
+        super(ResourceList, self).__init__(
             client,
-            (resource,),
+            path
         )
-        self._resource_name = resource
-        resource_cls = get_implementation(Resource, RESOURCE=resource)
+        self._resource_name = path[-1]
+        resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
         self._resource_schema = resource_cls.SCHEMA
         self._id = resource_cls.IDENTIFIER
-        self.resource = functools.partial(resource_cls, self)
+        self._resource = functools.partial(resource_cls, client, self._path)
 
     def _get(self, where, query):
 
         response = self._request(query=query)
 
+        if not where:
+            where = {}
+
         def resources():
-            req = True
-            for entity in response:
-                ent = self.resource(entity)
+            upd = True
+            for kwargs in response:
+                resource = self._resource(kwargs)
                 try:
-                    if req:
-                        ent.get()
+                    if upd:
+                        resource.get()
                 except HttpError as e:
-                    req = False
-                yield ent
+                    upd = False
+                yield resource
 
-        if where:
+        for resource in resources():
+            try:
+                if all(resource[k] == v for k, v in where.items()):
+                    yield resource
+            except KeyError as e:
+                raise FilterError(
+                    '''Resource "{}" doesn't have "{}" field'''.
+                    format(self._resource_name, e.message)
+                )
 
-            #filter with kwargs if they are present
-            def filtered_resources():
-                for resource in resources():
-                    try:
-                        if all(resource[k] == v for k, v in where.items()):
-                            yield resource
-                    except KeyError as e:
-                        raise FilterError(
-                            '''Resource "{}" doesn't have "{}" field'''.
-                            format(self._resource_name, e.message)
-                        )
+    def _request(self, method='get', **kwargs):
+        path = kwargs.get('path', ())
+        if _resource_list_slash:
+            kwargs.update(path=path+('',))
 
-            entities_gen = filtered_resources()
-        else:
-            entities_gen = iter(response)
-
-        return entities_gen
+        return super(ResourceList, self)._request(method, **kwargs)
 
     def get(self, where=None, query=None):
         """
@@ -247,10 +238,10 @@ class ResourceFactory(BaseChainedRequester, ChainCaller):
         if self._resource_schema:
             jsonschema.validate(kwargs, self._resource_schema)
         t_id = (self._request(method='post', body=kwargs)[self._id],)
-        return self.resource(self._request(path=t_id))
+        return self._resource(self._request(path=t_id))
 
 
-class Client(object, ChainCaller):
+class Client(Base):
     """
     Entry point for the front end API.Does not contain
     public methods, only holds resource fabrics
@@ -268,7 +259,8 @@ class Client(object, ChainCaller):
     def __init__(self, url, auth=None):
         self.url = 'http://{}'.format(url)
         self.auth = auth
-        self.trailing_slash = False
+        self._client = self
+        self._path = ()
 
     def _request(self, method='get', **kwargs):
         """
@@ -281,10 +273,9 @@ class Client(object, ChainCaller):
         if query:
             query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
                                         for k, v in query.iteritems())
-        trailing = '/' if self.trailing_slash else ''
 
         path = kwargs.get('path', ())
-        url = '/'.join((self.url,) + path) + trailing + query_path
+        url = '/'.join((self.url,) + path) + query_path
 
         headers = kwargs.get('headers', {})
         headers.update({'Content-Type': 'application/json'})
@@ -318,7 +309,7 @@ class Client(object, ChainCaller):
         return response.json()
 
 
-class FakeClient(object, ChainCaller):
+class FakeClient(object):
     """
     Entry point for the front end API.Does not contain
     public methods, only holds resource fabrics
@@ -334,6 +325,8 @@ class FakeClient(object, ChainCaller):
         self.url = 'http://{}'.format(url)
         self.auth = auth
         self.trailing_slash = False
+
+
 
     def _request(self, method='get', path=None, query=None, body=None):
         """
@@ -378,4 +371,3 @@ def context_headers(cls, callback):
     def __call(self):
         return Context(self, _headers=callback)
     cls.__call__ = __call
-

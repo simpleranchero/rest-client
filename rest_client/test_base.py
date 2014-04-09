@@ -7,12 +7,12 @@ import httpretty
 
 import base
 
-
-class VersionFactory(base.ResourceFactory):
+from pprint import pprint as pp
+class VersionFactory(base.ResourceList):
     RESOURCE = 'version'
 
     def _get(self, where=None, query=None):
-        return iter([self.resource(self._request(query=query))])
+        return iter([self._resource(self._request(query=query))])
 
 
 class Version(base.Resource):
@@ -280,16 +280,16 @@ class TestBase(object):
         #     client.agents.first(where={'name': 'Adler'})
 
     def test_fake_client_create_resource(self, fakeclient):
-        fakeclient.nf.firewalls.get()
+        pass
 
     def test_int_id_can_be_requested(self, client):
         adler = client.agents.first(where={'name': 'Adler'})
         assert adler['email'] == self.service['adler']['data']['email']
 
     def test_trailing_slash(self, client):
-        client.trailing_slash = True
+        base._resource_list_slash = True
         slashed_adler = client.slashedagents.first(where={'name': 'Adler'})
-        client.trailing_slash = False
+        base._resource_list_slash = False
         assert slashed_adler['name'] == 'Adler'
 
     def test_context_headers(self, client):
