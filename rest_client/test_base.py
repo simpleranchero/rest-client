@@ -1,13 +1,13 @@
 import json
 
-import jsonschema
 import requests
 import pytest
 import httpretty
 
 import base
+import custom_resource
 
-from pprint import pprint as pp
+
 class VersionFactory(base.ResourceList):
     RESOURCE = 'version'
 
@@ -218,6 +218,10 @@ class TestBase(object):
         return base.Client('random.random.org/v1')
 
     @pytest.fixture(scope='class')
+    def custom_client(self):
+        return custom_resource.Client('random.random.org/v1')
+
+    @pytest.fixture(scope='class')
     def fakeclient(self):
         return base.FakeClient('random.random.org/v1')
 
@@ -302,3 +306,7 @@ class TestBase(object):
     def test_resource_identifier_propagation(self, client):
         # TODO: Write actual test, ASAP
         pass
+
+    def test_reimplemintation_default_resource(self, custom_client):
+        deal = custom_client.deals.first()
+        assert deal._kwargs == deal.data()

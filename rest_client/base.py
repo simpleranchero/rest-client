@@ -1,4 +1,3 @@
-import contextlib
 import functools
 import json
 import logging
@@ -23,10 +22,15 @@ _resource_slash = False
 
 
 def get_implementation(cls, **kwargs):
+
+    return_cls = cls
     for subclass in cls.__subclasses__():
-        if all(getattr(subclass, k, None) == v for k, v in kwargs.iteritems()):
+        if all(getattr(subclass, k) == v for k, v in kwargs.iteritems()):
             return subclass
-    return cls
+
+        elif all(getattr(subclass, k) is None for k in kwargs):
+            return_cls = get_implementation(subclass, **kwargs)
+    return return_cls
 
 
 class HttpError(Exception):
@@ -171,6 +175,10 @@ class ResourceList(BaseRequest):
         )
         self._resource_name = path[-1]
         resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
+        print '*'*8
+        print self._resource_name
+        print resource_cls
+        print '*'*8
         self._resource_schema = resource_cls.SCHEMA
         self._id = resource_cls.IDENTIFIER
         self._resource = functools.partial(resource_cls, client, self._path)
@@ -237,8 +245,9 @@ class ResourceList(BaseRequest):
         """
         if self._resource_schema:
             jsonschema.validate(kwargs, self._resource_schema)
-        t_id = (self._request(method='post', body=kwargs)[self._id],)
-        return self._resource(self._request(path=t_id))
+        resource = self._resource(self._request(method='post', body=kwargs))
+        resource.get()
+        return resource
 
 
 class Client(Base):
