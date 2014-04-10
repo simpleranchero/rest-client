@@ -4,6 +4,7 @@ import logging
 import urllib2
 import pprint
 
+import furl
 import jsonschema
 import requests
 
@@ -53,12 +54,10 @@ class Base(object):
     def __init__(self, client, path):
         self._client = client
         self._path = path
-        print path
 
     def __getattr__(self, item):
-        print item
         resource_list_cls = get_implementation(ResourceList, RESOURCE=item)
-        return resource_list_cls(self._client, self._path + (item,))
+        return resource_list_cls(self._client, item, self._path)
 
 
 class BaseRequest(Base):
@@ -71,9 +70,7 @@ class BaseRequest(Base):
         @param body: dict that will be dumped to json
         @return: response dict or list of dicts
         """
-        pprint.pprint(kwargs)
-        path = self._path + kwargs.get('path', ())
-        kwargs.update(path=path)
+        kwargs.update(path=self._path)
         return self._client._request(method=method, **kwargs)
 
 
@@ -90,9 +87,8 @@ class Resource(BaseRequest):
     IDENTIFIER = _identifier
     SCHEMA = None
 
-    def __init__(self, client, path, kwargs):
-        self._resource_name = path[-1]
-        path = path + (str(kwargs[self.IDENTIFIER]),)
+    def __init__(self, client, resource, path, kwargs):
+        self._resource_name = resource
         super(Resource, self).__init__(client, path)
         self._kwargs = kwargs
 
@@ -112,7 +108,7 @@ class Resource(BaseRequest):
         """
         Updates resource objects attributes
         """
-        kwargs = self._request()
+        kwargs = self._request().json()
         self._update(kwargs)
 
     def post(self, **kwargs):
@@ -167,25 +163,24 @@ class ResourceList(BaseRequest):
 
     RESOURCE = None
 
-    def __init__(self, client, path):
-
+    def __init__(self, client, resource, path):
+        if _resource_list_slash:
+            resource += '/'
         super(ResourceList, self).__init__(
             client,
-            path
+            '/'.join([path, resource])
         )
-        self._resource_name = path[-1]
+        self._resource_name = resource
         resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
-        print '*'*8
-        print self._resource_name
-        print resource_cls
-        print '*'*8
         self._resource_schema = resource_cls.SCHEMA
         self._id = resource_cls.IDENTIFIER
-        self._resource = functools.partial(resource_cls, client, self._path)
+        self._resource = functools.partial(resource_cls,
+                                           client,
+                                           self._resource_name)
 
     def _get(self, where, query):
 
-        response = self._request(query=query)
+        response = self._request(query=query).json()
 
         if not where:
             where = {}
@@ -193,7 +188,8 @@ class ResourceList(BaseRequest):
         def resources():
             upd = True
             for kwargs in response:
-                resource = self._resource(kwargs)
+                path = '/'.join([self._path, str(kwargs[self._id])])
+                resource = self._resource(path, kwargs)
                 try:
                     if upd:
                         resource.get()
@@ -210,13 +206,6 @@ class ResourceList(BaseRequest):
                     '''Resource "{}" doesn't have "{}" field'''.
                     format(self._resource_name, e.message)
                 )
-
-    def _request(self, method='get', **kwargs):
-        path = kwargs.get('path', ())
-        if _resource_list_slash:
-            kwargs.update(path=path+('',))
-
-        return super(ResourceList, self)._request(method, **kwargs)
 
     def get(self, where=None, query=None):
         """
@@ -245,7 +234,11 @@ class ResourceList(BaseRequest):
         """
         if self._resource_schema:
             jsonschema.validate(kwargs, self._resource_schema)
-        resource = self._resource(self._request(method='post', body=kwargs))
+
+        response = self._request(method='post', body=kwargs)
+        kwargs = response.json()
+        path = response.headers.get('location', self._path)
+        resource = self._resource(path, kwargs)
         resource.get()
         return resource
 
@@ -266,10 +259,13 @@ class Client(Base):
     _headers = {}
 
     def __init__(self, url, auth=None):
-        self.url = 'http://{}'.format(url)
+        args = iter(url.split('/', 1))
+        base = next(args)
+        path = next(args, '')
+        self.url = 'http://{}'.format(base)
         self.auth = auth
         self._client = self
-        self._path = ()
+        self._path = '/'+path if path else path
 
     def _request(self, method='get', **kwargs):
         """
@@ -283,8 +279,8 @@ class Client(Base):
             query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
                                         for k, v in query.iteritems())
 
-        path = kwargs.get('path', ())
-        url = '/'.join((self.url,) + path) + query_path
+        path = kwargs.get('path', "")
+        url = ''.join([self.url, path, query_path])
 
         headers = kwargs.get('headers', {})
         headers.update({'Content-Type': 'application/json'})
@@ -315,7 +311,7 @@ class Client(Base):
         if response.status_code not in range(200, 210):
             raise HttpError('\n'.join((str(response.status_code),
                                        response.text)))
-        return response.json()
+        return response
 
 
 class FakeClient(object):

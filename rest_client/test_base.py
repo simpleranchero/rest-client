@@ -12,7 +12,11 @@ class VersionFactory(base.ResourceList):
     RESOURCE = 'version'
 
     def _get(self, where=None, query=None):
-        return iter([self._resource(self._request(query=query))])
+        return iter(
+            [self._resource(
+                self._path,
+                self._request(query=query).json())]
+        )
 
 
 class Version(base.Resource):
@@ -160,9 +164,9 @@ class TestBase(object):
         security = {
             "url": '/departments/123456',
             "data": {
-            'title': 'security',
-            'id': '123456',
-            'access': 'AAA'
+                'title': 'security',
+                'id': '123456',
+                'access': 'AAA'
             }
         }
 
@@ -184,6 +188,22 @@ class TestBase(object):
             }
         }
 
+        users = {
+            "url": '/users',
+            "data": [
+                {'id': '11111'}
+            ]
+        }
+
+        user = {
+            'url': '/users/11111',
+            "data": {
+                'id': '11111',
+                'name': 'user',
+                'heap': 'high'
+            }
+        }
+
         cls.service = {
             "deals": deals,
             "test_deal": test_deal,
@@ -199,7 +219,9 @@ class TestBase(object):
             'departments': departments,
             'security': security,
             'mysteries': mysteries,
-            'super_mystery': super_mystery
+            'super_mystery': super_mystery,
+            'users': users,
+            'user': user
         }
 
         for value in cls.service.values():
@@ -210,6 +232,20 @@ class TestBase(object):
                                    forcing_headers=headers,
                                    content_type="application/json")
 
+        p_users = {
+            'url': '/departments/123456/users',
+            'headers': {'location': '/v1/users/11111'},
+            'data': {
+                'id': '11111'
+            }
+        }
+
+        httpretty.register_uri(httpretty.POST,
+                               ''.join([base_url, p_users['url']]),
+                               body=json.dumps(p_users['data']),
+                               adding_headers=p_users['headers'],
+                               content_type="application/json")
+
         fin = lambda: httpretty.disable()
         request.addfinalizer(fin)
 
@@ -219,7 +255,7 @@ class TestBase(object):
 
     @pytest.fixture(scope='class')
     def custom_client(self):
-        return custom_resource.Client('random.random.org/v1')
+        return custom_resource.Client('random.random.org')
 
     @pytest.fixture(scope='class')
     def fakeclient(self):
@@ -233,6 +269,11 @@ class TestBase(object):
     def test_get_all(self, client):
         assert client.deals.get()[1]['id'] == \
             self.service['deals']['data'][1]['id']
+
+    def test_post(self, client):
+        security = client.departments.first()
+        user = security.users.post()
+
 
     def test_get_first(self, client):
         assert client.deals.first()['id'] == '1111'
@@ -308,5 +349,5 @@ class TestBase(object):
         pass
 
     def test_reimplemintation_default_resource(self, custom_client):
-        deal = custom_client.deals.first()
+        deal = custom_client.v1.deals.first()
         assert deal._kwargs == deal.data()
