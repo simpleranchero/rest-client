@@ -70,7 +70,8 @@ class BaseRequest(Base):
         @param body: dict that will be dumped to json
         @return: response dict or list of dicts
         """
-        kwargs.update(path=self._path)
+        path = kwargs.get('path', '')
+        kwargs.update(path=self._path+path)
         return self._client._request(method=method, **kwargs)
 
 
@@ -164,19 +165,23 @@ class ResourceList(BaseRequest):
     RESOURCE = None
 
     def __init__(self, client, resource, path):
-        if _resource_list_slash:
-            resource += '/'
         super(ResourceList, self).__init__(
             client,
             '/'.join([path, resource])
         )
         self._resource_name = resource
         resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
-        self._resource_schema = resource_cls.SCHEMA
+        self.SCHEMA = resource_cls.SCHEMA
         self._id = resource_cls.IDENTIFIER
         self._resource = functools.partial(resource_cls,
                                            client,
                                            self._resource_name)
+
+    def _request(self, method='get', **kwargs):
+        path = kwargs.get('path', '')
+        tail = '/' if _resource_list_slash else ''
+        kwargs.update(path=path+tail)
+        return super(ResourceList, self)._request(method, **kwargs)
 
     def _get(self, where, query):
 
@@ -232,8 +237,8 @@ class ResourceList(BaseRequest):
         @rtype resource sub-type
         @return: specified on time of creation resource
         """
-        if self._resource_schema:
-            jsonschema.validate(kwargs, self._resource_schema)
+        if self.SCHEMA:
+            jsonschema.validate(kwargs, self.SCHEMA)
 
         response = self._request(method='post', body=kwargs)
         kwargs = response.json()
@@ -261,11 +266,11 @@ class Client(Base):
     def __init__(self, url, auth=None):
         args = iter(url.split('/', 1))
         base = next(args)
-        path = next(args, '')
+        path = next(args, None)
         self.url = 'http://{}'.format(base)
         self.auth = auth
         self._client = self
-        self._path = '/'+path if path else path
+        self._path = '/'+path if path is not None else ''
 
     def _request(self, method='get', **kwargs):
         """
