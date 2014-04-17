@@ -4,7 +4,6 @@ import logging
 import urllib2
 import pprint
 
-import furl
 import jsonschema
 import requests
 
