@@ -21,6 +21,10 @@ _resource_list_slash = False
 _resource_slash = False
 
 
+def empty_callable(*args, **kwargs):
+    pass
+
+
 def get_implementation(cls, **kwargs):
 
     return_cls = cls
@@ -360,6 +364,8 @@ class FakeClient(object):
 
 class Context():
     def __init__(self, obj,  **kwargs):
+        self.obj = obj
+        self._exit_callback = kwargs.pop('exit_callback')
         self.kwargs = {k: v(obj) for k, v in kwargs.iteritems()}
 
     def _update_cls(self, kwargs):
@@ -374,9 +380,10 @@ class Context():
         self._update_cls(self.initial)
         if exc_type:
             raise exc_type(exc_val)
+        self._exit_callback(self.obj)
 
 
-def context_headers(cls, callback):
+def context_headers(cls, enter, exit=empty_callable):
     def __call(self):
-        return Context(self, _headers=callback)
+        return Context(self, _headers=enter, exit_callback=exit)
     cls.__call__ = __call

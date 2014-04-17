@@ -42,7 +42,11 @@ class Agent(base.Resource):
 class Department(base.Resource):
     RESOURCE = 'departments'
 
-base.context_headers(Department, lambda obj: {'X-department': obj['id']})
+    def foo(self):
+        self._kwargs['bar'] = 'spam'
+
+base.context_headers(Department, lambda obj: {'X-department': obj['id']},
+                     lambda obj: obj.foo())
 
 
 class TestBase(object):
@@ -342,7 +346,7 @@ class TestBase(object):
         with security():
             super_mystery = \
                 client.mysteries.first(where={'title': 'super mystery'})
-        assert super_mystery['text'] == 'this service is fake'
+        assert security['bar'] == 'spam'
 
     def test_resource_identifier_propagation(self, client):
         # TODO: Write actual test, ASAP
