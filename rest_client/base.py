@@ -49,7 +49,7 @@ class FilterError(BaseRestError):
     pass
 
 
-class Base(object):
+class Base():
     """
     Get resource by property
     """
@@ -78,7 +78,7 @@ class BaseRequest(Base):
         return self._client._request(method=method, **kwargs)
 
 
-class Resource(BaseRequest):
+class Resource(BaseRequest, object):
     """
     Resource base class, that can hold resource lists.
     @param client: object with _request method, for url chaining
@@ -151,7 +151,7 @@ class Resource(BaseRequest):
              footer))
 
 
-class ResourceList(BaseRequest):
+class ResourceList(BaseRequest, list):
     """
     Creates or lists resources
     @param client: object with _request method, for url chaining
