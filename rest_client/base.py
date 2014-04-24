@@ -173,13 +173,10 @@ class ResourceList(BaseRequest, list):
             '/'.join([path, resource])
         )
         self._resource_name = resource
-        resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
-        self.SCHEMA = resource_cls.SCHEMA
-        self._id = resource_cls.IDENTIFIER
-        self._resource = functools.partial(resource_cls,
-                                           client,
-                                           self._resource_name)
-
+        self._resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
+        self.SCHEMA = self._resource_cls.SCHEMA
+        self._id = self._resource_cls.IDENTIFIER
+        
     def _request(self, method='get', **kwargs):
         path = kwargs.get('path', '')
         tail = '/' if _resource_list_slash else ''
@@ -214,6 +211,13 @@ class ResourceList(BaseRequest, list):
                     '''Resource "{}" doesn't have "{}" field'''.
                     format(self._resource_name, e.message)
                 )
+
+    def _resource(self, path, kwargs):
+        return self._resource_cls(self._client,
+                                  self._resource_name,
+                                  path,
+                                  kwargs)
+
 
     def get(self, where=None, query=None):
         """
