@@ -261,10 +261,6 @@ class TestBase(object):
     def custom_client(self):
         return custom_resource.Client('random.random.org')
 
-    @pytest.fixture(scope='class')
-    def fakeclient(self):
-        return base.FakeClient('random.random.org/v1')
-
     def test_sanity(self, client):
         client.deals.get()
         response = requests.get("http://random.random.org/v1/deals")
@@ -328,8 +324,6 @@ class TestBase(object):
         # with pytest.raises(jsonschema.ValidationError) as excinfo:
         #     client.agents.first(where={'name': 'Adler'})
 
-    def test_fake_client_create_resource(self, fakeclient):
-        pass
 
     def test_int_id_can_be_requested(self, client):
         adler = client.agents.first(where={'name': 'Adler'})
@@ -349,7 +343,7 @@ class TestBase(object):
         assert security['bar'] == 'spam'
 
     def test_resource_identifier_propagation(self, client):
-        # TODO: Write actual test, ASAP
+        # TODO: Write actual test
         pass
 
     def test_reimplemintation_default_resource(self, custom_client):

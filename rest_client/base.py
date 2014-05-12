@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 requests_log = logging.getLogger("requests")
 requests_log.setLevel(logging.WARNING)
 
-
+# TODO: Need a better configuration facilities
 _identifier = 'id'
 _resource_list_slash = False
 _resource_slash = False
@@ -26,13 +26,28 @@ def empty_callable(*args, **kwargs):
 
 
 def get_implementation(cls, **kwargs):
+    """
+    @param cls: Base class in which to search for inheritors
+    @param kwargs: a dict of {class property name: class property value} to
+    look for in @cls inheritors
+    @return class, that have class properties matching, or the latest,
+    that do not properties.
 
+    usage:
+    >>>class BaseResource(object): pass
+    >>>class Resource(BaseResource): pass
+    >>>get_implementation(BaseResource, resource='users')
+    __main__.Resource
+    >>>class Users(BaseResource): resource = 'users'
+    >>>get_implementation(BaseResource, resource='users')
+    __main__.Users
+    """
     return_cls = cls
     for subclass in cls.__subclasses__():
-        if all(getattr(subclass, k) == v for k, v in kwargs.iteritems()):
+        if all(getattr(subclass, k, None) == v for k, v in kwargs.iteritems()):
             return subclass
 
-        elif all(getattr(subclass, k) is None for k in kwargs):
+        elif all(getattr(subclass, k, None) is None for k in kwargs):
             return_cls = get_implementation(subclass, **kwargs)
     return return_cls
 
@@ -51,7 +66,7 @@ class FilterError(BaseRestError):
 
 class Base():
     """
-    Get resource by property
+    Get resource list by name MixIn
     """
 
     def __init__(self, client, path):
@@ -66,7 +81,7 @@ class Base():
 class BaseRequest(Base):
     def _request(self, method='get', **kwargs):
         """
-        delegates inner requests to client object with adding
+        Delegates inner requests to client object with adding
         base path to any requested path
         @param method: requests http method
         @param path: tuple of path to add to base path
@@ -79,13 +94,17 @@ class BaseRequest(Base):
 
 
 class Resource(BaseRequest, object):
+    # TODO: test dict as base class to enable unpacking
     """
-    Resource base class, that can hold resource lists.
+    Resource base class, that can hold resource lists as properties.
     @param client: object with _request method, for url chaining
     @param kwargs: resource attributes
 
     usage:
-    foo = client.resources.post(name='foo')
+    >>>client = Client("localhost")
+    >>>foo = client.resources.post(name='foo')
+    >>>foo.put(name='bar')
+    >>>spam = foo.nested_resources.post('SPAM')
     """
     RESOURCE = None
     IDENTIFIER = _identifier
@@ -125,7 +144,7 @@ class Resource(BaseRequest, object):
 
     def put(self, **kwargs):
         """
-        Updates whole resource. Is idempotent
+        Updates resource.
         @params kwargs: attributes to update
         """
         self._request('put', body=kwargs)
@@ -157,12 +176,6 @@ class ResourceList(BaseRequest, list):
     @param client: object with _request method, for url chaining
     @param path: requested resource
 
-    usage:
-    class SomeResource():
-        def __init__(self, client):
-            self.resources = ResourceFactory(Resource)
-    ...
-    foo = bar.resources.get('first', name='foo')
     """
 
     RESOURCE = None
@@ -176,15 +189,20 @@ class ResourceList(BaseRequest, list):
         self._resource_cls = get_implementation(Resource, RESOURCE=self._resource_name)
         self.SCHEMA = self._resource_cls.SCHEMA
         self._id = self._resource_cls.IDENTIFIER
-        
+
     def _request(self, method='get', **kwargs):
+        """
+        Add trailing slash, if it is in config
+        """
         path = kwargs.get('path', '')
         tail = '/' if _resource_list_slash else ''
         kwargs.update(path=path+tail)
         return super(ResourceList, self)._request(method, **kwargs)
 
     def _get(self, where, query):
-
+        """
+        @return generator of resources that match @where dict
+        @raise FilterError if fields from @where are not found in resource"""
         response = self._request(query=query).json()
 
         if not where:
@@ -218,7 +236,6 @@ class ResourceList(BaseRequest, list):
                                   path,
                                   kwargs)
 
-
     def get(self, where=None, query=None):
         """
         Get resources with filtering
@@ -242,7 +259,7 @@ class ResourceList(BaseRequest, list):
         Create new resource
         @param kwargs: resource attributes
         @rtype resource sub-type
-        @return: specified on time of creation resource
+        @return: resource object as of /resources/<resource_id>
         """
         if self.SCHEMA:
             jsonschema.validate(kwargs, self.SCHEMA)
@@ -263,9 +280,10 @@ class Client(Base):
     @param url: base API url
 
     usage:
-    client = Client(('admin', 'password'),'10.10.121.53')
-    all_users = client.users.get()
-    ...
+    >>>client = Client(('admin', 'password'),'127.0.0.1')
+    >>>all_users = client.users.get()
+    >>>client._path
+    '127.0.0.1'
     """
 
     _headers = {}
@@ -311,59 +329,18 @@ class Client(Base):
                 data=body)
         except Exception as e:
             raise HttpError(e.message)
-        log.debug('-'*18)
-        log.debug('request : {} {} {}'.format(
+        log.info('request : {} {} {}'.format(
             method.upper(),
             url,
             response.status_code))
         log.debug('request headers: {}'.format(headers))
         log.debug('request body: {}'.format(response.request.body))
         log.debug('response body: {}'.format(response.text))
-        log.debug('-'*18)
+        log.info('-'*18)
         if response.status_code not in range(200, 210):
             raise HttpError('\n'.join((str(response.status_code),
                                        response.text)))
         return response
-
-
-class FakeClient(object):
-    """
-    Entry point for the front end API.Does not contain
-    public methods, only holds resource fabrics
-    @param auth: username/password tuple
-    @param url: base API url
-
-    usage:
-    client = Client(('admin', 'password'),'10.10.121.53')
-    all_users = client.users.get()
-    ...
-    """
-    def __init__(self, url, auth=None):
-        self.url = 'http://{}'.format(url)
-        self.auth = auth
-        self.trailing_slash = False
-
-
-
-    def _request(self, method='get', path=None, query=None, body=None):
-        """
-        Request sender. Joins all chained resources in path.
-        @raises HttpError is response is not ok
-        """
-        query_path = ''
-        if query:
-            query_path = '?' + '&'.join('{}={}'.format(k, urllib2.quote(v))
-                                        for k, v in query.iteritems())
-        trailing = '/' if self.trailing_slash else ''
-        url = '/'.join((self.url,) + path) + trailing + query_path
-
-        headers = {'Content-Type': 'application/json'}
-
-        print method.upper(), url
-        print "headers: "
-        pprint.pprint(headers)
-        pprint.pprint(body)
-        return [{'id': '1'}]
 
 
 class Context():
